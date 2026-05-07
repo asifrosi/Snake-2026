@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidLeaderboardEntry(data) {
+      return data.keys().hasAll(['playerName', 'score', 'timestamp', 'userId']) &&
+             data.keys().size() == 4 &&
+             data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 50 &&
+             data.score is int && data.score >= 0 &&
+             data.timestamp == request.time &&
+             data.userId == request.auth.uid;
+    }
+
+    function isValidGameState(data) {
+      return data.keys().hasAll(['snakeBody', 'score', 'foodList', 'direction', 'currentTheme', 'timestamp']) &&
+             data.keys().size() == 6 &&
+             data.snakeBody is list &&
+             data.score is int &&
+             data.foodList is list &&
+             data.direction is int &&
+             data.currentTheme is string &&
+             data.timestamp == request.time;
+    }
+
+    match /users/{userId}/saves/current {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId) && isValidGameState(incoming());
+      allow delete: if isOwner(userId);
+    }
+
+    match /leaderboard/{entryId} {
+      allow read: if true; // Publicly viewable leaderboard
+      
+      allow create: if isSignedIn() && 
+                    isValidId(entryId) && 
+                    isValidLeaderboardEntry(incoming());
+
+      allow update: if isSignedIn() && 
+                    isValidId(entryId) && 
+                    isOwner(existing().userId) &&
+                    isValidLeaderboardEntry(incoming()) &&
+                    incoming().userId == existing().userId &&
+                    incoming().score > existing().score &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['score', 'timestamp', 'playerName']);
+      
+      allow delete: if false; // Scores are permanent
+    }
+  }
+}

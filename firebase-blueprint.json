@@ -1,0 +1,53 @@
+{
+  "entities": {
+    "LeaderboardEntry": {
+      "title": "Leaderboard Entry",
+      "description": "A high score entry on the global leaderboard.",
+      "type": "object",
+      "properties": {
+        "playerName": {
+          "type": "string",
+          "description": "The name of the player."
+        },
+        "score": {
+          "type": "integer",
+          "description": "The score achieved."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the score was recorded."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The unique ID of the player (auth UID)."
+        }
+      },
+      "required": ["playerName", "score", "timestamp", "userId"]
+    },
+    "GameState": {
+      "title": "Game State",
+      "description": "Saved progress for a player's game session.",
+      "type": "object",
+      "properties": {
+        "snakeBody": { "type": "array" },
+        "score": { "type": "integer" },
+        "foodList": { "type": "array" },
+        "direction": { "type": "integer" },
+        "currentTheme": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["snakeBody", "score", "foodList", "direction", "currentTheme", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/leaderboard/{entryId}": {
+      "schema": "LeaderboardEntry",
+      "description": "Global leaderboard entries."
+    },
+    "/users/{userId}/saves/current": {
+      "schema": "GameState",
+      "description": "The user's current saved game state."
+    }
+  }
+}
