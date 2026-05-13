@@ -168,27 +168,27 @@ export type DifficultyLevel = 'easy' | 'medium' | 'hard';
 export const DIFFICULTY_CONFIG = {
   easy: {
     initialSpeed: 950,
-    npcCount: 135,
-    npcAggression: 0.45,
-    bossHealthMult: 0.7,
+    npcCount: 150,
+    npcAggression: 0.6,
+    bossHealthMult: 0.6,
     pointsMult: 1.0,
     name: "Easy",
     desc: "Relaxed pace, but more competitors"
   },
   medium: {
     initialSpeed: 800,
-    npcCount: 225,
-    npcAggression: 0.75,
-    bossHealthMult: 1.1,
+    npcCount: 220,
+    npcAggression: 0.9,
+    bossHealthMult: 1.0,
     pointsMult: 1.5,
     name: "Medium",
     desc: "High density chaos"
   },
   hard: {
     initialSpeed: 650,
-    npcCount: 360,
-    npcAggression: 1.25,
-    bossHealthMult: 2.0,
+    npcCount: 300,
+    npcAggression: 1.5,
+    bossHealthMult: 1.8,
     pointsMult: 2.5,
     name: "Extreme",
     desc: "Total GRID WARFARE"
@@ -828,6 +828,7 @@ export default function SnakeGame() {
     setGameStartTime(Date.now());
     setDirection(0);
     setIsGameOver(false);
+    setIsPlaying(true);
     setFoodList([]);
     setNpcSnakes([]); 
     spawnFood(WORLD_WIDTH, WORLD_HEIGHT, 100); // Doubled from 50
@@ -839,11 +840,22 @@ export default function SnakeGame() {
     for (let i = 0; i < count; i++) {
       const x = Math.floor(Math.random() * (WORLD_WIDTH / GRID_SIZE)) * GRID_SIZE;
       const y = Math.floor(Math.random() * (WORLD_HEIGHT / GRID_SIZE)) * GRID_SIZE;
+      const dir = Math.floor(Math.random() * 4);
+      
+      // Initialize body based on direction to avoid self-collision at start
+      const body = [{ x, y }];
+      for (let j = 1; j <= 3; j++) {
+        if (dir === 0) body.push({ x: x - GRID_SIZE * j, y });
+        else if (dir === 1) body.push({ x, y: y - GRID_SIZE * j });
+        else if (dir === 2) body.push({ x: x + GRID_SIZE * j, y });
+        else if (dir === 3) body.push({ x, y: y + GRID_SIZE * j });
+      }
+
       newNpcs.push({
         id: `npc-${Math.random().toString(36).substr(2, 9)}`,
-        snakeBody: [{ x, y }, { x: x - GRID_SIZE, y }, { x: x - GRID_SIZE * 2, y }],
+        snakeBody: body,
         score: Math.floor(Math.random() * 5),
-        direction: Math.floor(Math.random() * 4),
+        direction: dir,
         hue: Math.random() * 360,
         targetPoint: null,
         speedMult: 0.8 + Math.random() * 0.4,
@@ -853,7 +865,7 @@ export default function SnakeGame() {
       });
     }
     setNpcSnakes(newNpcs);
-  }, []);
+  }, [difficulty]);
 
   useEffect(() => {
     if (isPlaying && npcSnakes.length === 0) {
@@ -969,14 +981,9 @@ export default function SnakeGame() {
         }
       }
 
-      // Self Collision
       const isGhost = activePowerUps.ghost > Date.now();
-      if (!isGhost && prevBody.some(s => s.x === newHead.x && s.y === newHead.y)) {
-        const bodyFoods = prevBody.map(s => ({ x: s.x, y: s.y, type: 'normal' as const }));
-        setFoodList(f => [...f, ...bodyFoods]);
-        endGame();
-        return prevBody;
-      }
+      
+      // Self Collision check removed per user request (User can pass through their own body)
 
       // Other Players & NPCs Collision
       let collidedWithOther = false;
@@ -1061,26 +1068,55 @@ export default function SnakeGame() {
         socketRef.current?.emit('sync-food', { roomId, foodList: nextFoodList });
         
         // Check for Big Snake Boss trigger (EVERY 10 FOODS)
-        if (nextScore > 0 && nextScore % 10 === 0) {
-          const ltr = (nextScore / 10) % 2 !== 0;
-          const spawnY = Math.floor(Math.random() * (WORLD_HEIGHT / GRID_SIZE)) * GRID_SIZE;
+        const bossInterval = 10;
+        if (nextScore > 0 && Math.floor(nextScore / bossInterval) > Math.floor(score / bossInterval)) {
+          const randDir = Math.floor(Math.random() * 4);
+          let spawnX = 0;
+          let spawnY = 0;
+          let dirKey: 'LTR' | 'RTL' | 'UTD' | 'DTU' = 'LTR';
+
+          if (randDir === 0) { // Left to Right
+            spawnX = -GRID_SIZE * 20;
+            spawnY = Math.floor(Math.random() * (WORLD_HEIGHT / GRID_SIZE)) * GRID_SIZE;
+            dirKey = 'LTR';
+          } else if (randDir === 1) { // Right to Left
+            spawnX = WORLD_WIDTH + GRID_SIZE * 20;
+            spawnY = Math.floor(Math.random() * (WORLD_HEIGHT / GRID_SIZE)) * GRID_SIZE;
+            dirKey = 'RTL';
+          } else if (randDir === 2) { // Up to Down
+            spawnX = Math.floor(Math.random() * (WORLD_WIDTH / GRID_SIZE)) * GRID_SIZE;
+            spawnY = -GRID_SIZE * 20;
+            dirKey = 'UTD';
+          } else { // Down to Up
+            spawnX = Math.floor(Math.random() * (WORLD_WIDTH / GRID_SIZE)) * GRID_SIZE;
+            spawnY = WORLD_HEIGHT + GRID_SIZE * 20;
+            dirKey = 'DTU';
+          }
+
+          const healthMult = DIFFICULTY_CONFIG[difficulty].bossHealthMult;
           const nextBoss = {
             active: true,
-            direction: ltr ? 'LTR' : 'RTL' as const,
-            x: ltr ? -GRID_SIZE * 20 : WORLD_WIDTH + GRID_SIZE * 5,
+            direction: dirKey,
+            x: spawnX,
             y: spawnY,
             baseY: spawnY,
             phase: 0,
-            speedMult: 1,
-            health: 150 + nextScore,
-            maxHealth: 150 + nextScore
+            speedMult: 1.2 + (nextScore / 400),
+            health: Math.floor((150 + nextScore) * healthMult),
+            maxHealth: Math.floor((150 + nextScore) * healthMult),
+            mode: 'patrol' as 'patrol' | 'hunt' | 'trap' | 'charge' | 'stunned',
+            lastAttack: Date.now(),
+            chargeLevel: 0,
+            warning: false,
+            stunTimer: 0,
+            stunProgress: 0
           };
           setBossSnake(nextBoss);
           socketRef.current?.emit('sync-boss', { roomId, bossSnake: nextBoss });
           playSound('boss');
           
-          // Spawn extra foods for total 3
-          spawnFood(WORLD_WIDTH, WORLD_HEIGHT, 2);
+          // Spawn extra foods
+          spawnFood(WORLD_WIDTH, WORLD_HEIGHT, 3);
           setBossExitTime(null);
         }
       } else {
@@ -1129,11 +1165,19 @@ export default function SnakeGame() {
           // 1.1 Find the best target among all entities (Players or NPCs)
           let bestTarget = { pos: playerHead, dist: Math.sqrt(Math.pow(head.x - playerHead.x, 2) + Math.pow(head.y - playerHead.y, 2)), dir: direction, type: 'player' };
           
+          // Improved entity detection for more chaos
+          otherPlayersList.forEach(other => {
+            const d = Math.sqrt(Math.pow(head.x - other.snakeBody[0].x, 2) + Math.pow(head.y - other.snakeBody[0].y, 2));
+            if (d < bestTarget.dist) {
+                bestTarget = { pos: other.snakeBody[0], dist: d, dir: other.direction || 0, type: 'other-player' };
+            }
+          });
+
           prevNpcs.forEach((other, oIdx) => {
             if (oIdx === idx) return;
             const d = Math.sqrt(Math.pow(head.x - other.snakeBody[0].x, 2) + Math.pow(head.y - other.snakeBody[0].y, 2));
             // NPCs are highly aggressive toward other NPCs too
-            const weight = 1.0; // Equal priority for now to maximize chaos
+            const weight = 0.9; // Slightly prioritize attacking other NPCs for chaos
             if (d * weight < bestTarget.dist) {
               bestTarget = { pos: other.snakeBody[0], dist: d, dir: other.direction, type: 'npc' };
             }
@@ -1148,65 +1192,67 @@ export default function SnakeGame() {
           });
 
           const isAggressive = bestTarget.dist < baseAggressionRange || targetMood === 'hunt';
-          const currentSpeed = isAggressive ? (speedMult || 1.0) * (1.1 + config.npcAggression * 0.4) : (speedMult || 1.0);
+          const currentSpeed = isAggressive ? (speedMult || 1.0) * (1.2 + config.npcAggression * 0.5) : (speedMult || 1.0);
 
           // AI Reaction Logic: Update target more intelligently
           const shouldUpdateTarget = !targetPoint || 
-                                   (Math.abs(head.x - targetPoint.x) < GRID_SIZE * 3 && Math.abs(head.y - targetPoint.y) < GRID_SIZE * 3) || 
-                                   (isAggressive && Math.random() > 0.6) || 
-                                   Math.random() > 0.95;
+                                   (Math.abs(head.x - targetPoint.x) < GRID_SIZE * 4 && Math.abs(head.y - targetPoint.y) < GRID_SIZE * 4) || 
+                                   (isAggressive && Math.random() > 0.4) || 
+                                   Math.random() > 0.98;
 
           if (shouldUpdateTarget) {
             if (targetMood === 'patrol' && patrolPoint) {
-               // Circle around patrol point
-               wanderingPhase += 0.5;
+               // Circle around patrol point with noise
+               wanderingPhase += 0.4;
                targetPoint = {
-                 x: patrolPoint.x + Math.cos(wanderingPhase) * 600,
-                 y: patrolPoint.y + Math.sin(wanderingPhase) * 600
+                 x: patrolPoint.x + Math.cos(wanderingPhase) * 800,
+                 y: patrolPoint.y + Math.sin(wanderingPhase) * 800
                };
-            } else if (isAggressive && (bestTarget.dist < 600 || foodList.length === 0)) {
+            } else if (isAggressive) {
                // HUNT / INTERCEPT
-               const predictFactor = 15 + config.npcAggression * 20;
+               const predictFactor = 10 + config.npcAggression * 15;
                const predictDist = GRID_SIZE * predictFactor;
                let px = bestTarget.pos.x;
                let py = bestTarget.pos.y;
                
-               if (bestTarget.dir === 0) px += predictDist;
-               else if (bestTarget.dir === 1) py += predictDist;
-               else if (bestTarget.dir === 2) px -= predictDist;
-               else if (bestTarget.dir === 3) py -= predictDist;
+               // Use target's actual direction for better interception
+               const tDir = bestTarget.dir;
+               if (tDir === 0) px += predictDist;
+               else if (tDir === 1) py += predictDist;
+               else if (tDir === 2) px -= predictDist;
+               else if (tDir === 3) py -= predictDist;
 
                targetPoint = { 
-                 x: px + (Math.random() - 0.5) * GRID_SIZE * 2, 
-                 y: py + (Math.random() - 0.5) * GRID_SIZE * 2 
+                 x: px + (Math.random() - 0.5) * GRID_SIZE * 4, 
+                 y: py + (Math.random() - 0.5) * GRID_SIZE * 4 
                };
             } else if (targetMood === 'curious' || foodList.length === 0) {
                // EXPLORATION
-               wanderingPhase += (Math.random() * 0.4 + 0.1);
-               const wanderRad = 1000 + Math.sin(wanderingPhase * 0.1) * 500;
+               wanderingPhase += (Math.random() * 0.6 + 0.2);
+               const wanderRad = 1200 + Math.sin(wanderingPhase * 0.2) * 600;
                targetPoint = {
                  x: head.x + Math.cos(wanderingPhase) * wanderRad,
                  y: head.y + Math.sin(wanderingPhase) * wanderRad
                };
             } else {
-              // SCAVENGE / Resource Priority
-              const searchRange = 1500;
-              const nearbyFood = foodList.filter(f => Math.abs(f.x - head.x) < searchRange && Math.abs(f.y - head.y) < searchRange);
-              
-              if (nearbyFood.length > 0) {
-                // Swarm detection: if food is clustered, NPCs are more likely to target the cluster
-                let nearest = nearbyFood[0];
-                let minDist = 1000000;
-                nearbyFood.forEach(f => {
-                  const d = Math.sqrt(Math.pow(f.x - head.x, 2) + Math.pow(f.y - head.y, 2));
-                  const weight = (f.type && f.type !== 'normal') ? 0.05 : 1.0; 
-                  const weightedDist = d * weight;
-                  if (weightedDist < minDist) { minDist = weightedDist; nearest = f; }
-                });
-                targetPoint = nearest;
-              } else {
-                targetMood = 'curious';
-              }
+               // SCAVENGE
+               const searchRange = 2000;
+               const nearbyFood = foodList.filter(f => Math.abs(f.x - head.x) < searchRange && Math.abs(f.y - head.y) < searchRange);
+               
+               if (nearbyFood.length > 0) {
+                 let nearest = nearbyFood[0];
+                 let minDist = 1000000;
+                 nearbyFood.forEach(f => {
+                   const d = Math.sqrt(Math.pow(f.x - head.x, 2) + Math.pow(f.y - head.y, 2));
+                   const weight = (f.type && f.type !== 'normal') ? 0.02 : 1.0; 
+                   const weightedDist = d * weight;
+                   if (weightedDist < minDist) { minDist = weightedDist; nearest = f; }
+                 });
+                 targetPoint = nearest;
+               } else {
+                 targetMood = 'curious';
+                 targetPoint = { x: Math.random() * WORLD_WIDTH, y: Math.random() * WORLD_HEIGHT };
+               }
             }
           }
 
@@ -1221,41 +1267,30 @@ export default function SnakeGame() {
           };
 
           const isColliding = (pos: Point) => {
-            if (pos.x < 0 || pos.x >= WORLD_WIDTH || pos.y < 0 || pos.y >= WORLD_HEIGHT) return true;
+            // Wall boundaries
+            if (pos.x < GRID_SIZE || pos.x >= WORLD_WIDTH - GRID_SIZE || pos.y < GRID_SIZE || pos.y >= WORLD_HEIGHT - GRID_SIZE) return true;
             
-            // AGGRESSIVE AVOIDANCE ZONE
-            const hitBuffer = GRID_SIZE * 1.8; 
-            
-            // Proactive avoidance of player path
-            const playerPredictDist = GRID_SIZE * 4;
-            let ppx = playerHead.x;
-            let ppy = playerHead.y;
-            if (direction === 0) ppx += playerPredictDist;
-            else if (direction === 1) ppy += playerPredictDist;
-            else if (direction === 2) ppx -= playerPredictDist;
-            else if (direction === 3) ppy -= playerPredictDist;
-
-            if (Math.abs(pos.x - ppx) < hitBuffer && Math.abs(pos.y - ppy) < hitBuffer) return true;
-
-            // Avoid player body
+            // Avoid player body (but be slightly more aggressive near head)
+            const playerBuff = isAggressive ? GRID_SIZE * 1.2 : GRID_SIZE * 1.8;
             for (const s of snakeBody) {
-                if (Math.abs(s.x - pos.x) < hitBuffer && Math.abs(s.y - pos.y) < hitBuffer) return true;
+                if (Math.abs(s.x - pos.x) < playerBuff && Math.abs(s.y - pos.y) < playerBuff) return true;
             }
             
             // Avoid other NPCs body
+            const npcBuff = GRID_SIZE * 1.5;
             for (let i = 0; i < prevNpcs.length; i++) {
+              if (i === idx) continue; 
               const other = prevNpcs[i];
-              const segmentsToIgnore = (i === idx) ? 1 : 0;
-              for (let j = segmentsToIgnore; j < other.snakeBody.length; j++) {
+              for (let j = 0; j < other.snakeBody.length; j++) {
                 const s = other.snakeBody[j];
-                if (Math.abs(s.x - pos.x) < hitBuffer && Math.abs(s.y - pos.y) < hitBuffer) return true;
+                if (Math.abs(s.x - pos.x) < npcBuff && Math.abs(s.y - pos.y) < npcBuff) return true;
               }
             }
 
             // Boss Avoidance
             if (bossSnake.active) {
                 const bossDist = Math.sqrt(Math.pow(pos.x - bossSnake.x, 2) + Math.pow(pos.y - bossSnake.y, 2));
-                if (bossDist < GRID_SIZE * 10) return true;
+                if (bossDist < GRID_SIZE * 12) return true;
             }
 
             return false;
@@ -1265,15 +1300,17 @@ export default function SnakeGame() {
           const dy = targetPoint.y - head.y;
           
           let preferredDirs = [
-            { dir: 0, score: dx > 0 ? Math.abs(dx) : -1 }, // Right
-            { dir: 1, score: dy > 0 ? Math.abs(dy) : -1 }, // Down
-            { dir: 2, score: dx < 0 ? Math.abs(dx) : -1 }, // Left
-            { dir: 3, score: dy < 0 ? Math.abs(dy) : -1 }  // Up
-          ].sort((a, b) => b.score - a.score);
+            { dir: 0, score: dx > 1 ? Math.abs(dx) : -1 }, // Right
+            { dir: 1, score: dy > 1 ? Math.abs(dy) : -1 }, // Down
+            { dir: 2, score: dx < -1 ? Math.abs(dx) : -1 }, // Left
+            { dir: 3, score: dy < -1 ? Math.abs(dy) : -1 }  // Up
+          ].sort((a, b) => {
+            if (Math.abs(b.score - a.score) < 1) return Math.random() - 0.5; // Tie break
+            return b.score - a.score;
+          });
 
-          let finalDir = npcDir;
-          let minRisk = 1000;
           let bestDir = npcDir;
+          let foundDir = false;
 
           for (const choice of preferredDirs) {
             if ((choice.dir + 2) % 4 === npcDir) continue;
@@ -1281,7 +1318,6 @@ export default function SnakeGame() {
             const nextP = getPos(choice.dir);
             if (!isColliding(nextP)) {
                // Look ahead even deeper for risk assessment
-               let risk = 0;
                const nextNextDirs = [0, 1, 2, 3].filter(d => (d + 2) % 4 !== choice.dir);
                let escapePaths = 0;
                for (const nd of nextNextDirs) {
@@ -1290,9 +1326,20 @@ export default function SnakeGame() {
                
                if (escapePaths > 0) {
                  bestDir = choice.dir;
-                 minRisk = escapePaths;
+                 foundDir = true;
                  break; 
                }
+            }
+          }
+
+          // Emergency avoidance if best path found above is still stuck
+          if (!foundDir) {
+            const allDirs = [0, 1, 2, 3].filter(d => (d + 2) % 4 !== npcDir).sort(() => Math.random() - 0.5);
+            for (const d of allDirs) {
+              if (!isColliding(getPos(d))) {
+                bestDir = d;
+                break;
+              }
             }
           }
 
@@ -1888,12 +1935,19 @@ export default function SnakeGame() {
       
       for (let i = 0; i < bossLen; i++) {
         // Individual segment movement for "slither" effect
-        const segX = bossSnake.direction === 'LTR' ? 
-          bossSnake.x - (i * GRID_SIZE * 1.8) : 
-          bossSnake.x + (i * GRID_SIZE * 1.8);
+        let segX = bossSnake.x;
+        let segY = bossSnake.y;
+        
+        const spacing = GRID_SIZE * 1.8;
+        if (bossSnake.direction === 'LTR') segX -= (i * spacing);
+        else if (bossSnake.direction === 'RTL') segX += (i * spacing);
+        else if (bossSnake.direction === 'UTD') segY -= (i * spacing);
+        else if (bossSnake.direction === 'DTU') segY += (i * spacing);
         
         // Match the update phase logic for wavy drawing
-        const segY = bossSnake.y - Math.sin(bossSnake.phase - i * 0.4) * (GRID_SIZE * 4);
+        const wave = Math.sin(bossSnake.phase - i * 0.4) * (GRID_SIZE * 4);
+        if (bossSnake.direction === 'LTR' || bossSnake.direction === 'RTL') segY -= wave;
+        else segX -= wave;
         
         const sizeMult = i === 0 ? 4.5 : 3.5 - (i * 0.05); // Tapered body
         const pulseGlow = (Math.sin(time / 150 - i * 0.5) + 1) / 2;
@@ -2512,7 +2566,7 @@ export default function SnakeGame() {
                       </div>
                     )}
                     <h2 className="text-2xl font-extrabold tracking-tighter mb-1 text-slate-900">
-                      {isGameOver ? 'MISSION TERMINATED' : 'SNAKE 2026'}
+                      {isGameOver ? '' : 'SNAKE 2026'}
                     </h2>
                     {isGameOver ? (
                       <div className="flex flex-col gap-4 mt-6 w-full animate-in fade-in zoom-in duration-500">
@@ -2529,47 +2583,26 @@ export default function SnakeGame() {
                           </div>
                         </div>
 
-                        {/* Neural Echo / Final Snake Replay Rendering */}
-                        <div className="relative w-full h-32 bg-slate-900 rounded-3xl overflow-hidden border-2 border-slate-800 flex items-center justify-center shadow-2xl group">
-                          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.1)_0%,transparent_70%)]" />
-                          <svg viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} className="w-full h-full opacity-60 scale-125 blur-[1px] group-hover:blur-0 transition-all duration-700">
-                            {/* Static Background Grid */}
-                            <pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse">
-                                <path d="M 100 0 L 0 0 0 100" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="1"/>
-                            </pattern>
-                            <rect width="100%" height="100%" fill="url(#grid)" />
-                            
-                            <motion.path
-                              d={`M ${finalSnakeBody.map(p => `${p.x} ${p.y}`).join(' L ')}`}
-                              fill="none"
-                              stroke={playerColors.head}
-                              strokeWidth={GRID_SIZE * 4}
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              initial={{ pathLength: 0, opacity: 0 }}
-                              animate={{ pathLength: 1, opacity: 1 }}
-                              transition={{ duration: 2, ease: "easeInOut" }}
-                            />
-                            {finalSnakeBody.length > 0 && (
-                                <motion.circle 
-                                    cx={finalSnakeBody[0].x} 
-                                    cy={finalSnakeBody[0].y} 
-                                    r={GRID_SIZE * 5}
-                                    fill={playerColors.head}
-                                    initial={{ scale: 0 }}
-                                    animate={{ scale: [1, 1.2, 1] }}
-                                    transition={{ duration: 2, repeat: Infinity }}
-                                    className="opacity-20"
-                                />
-                            )}
-                          </svg>
-                          <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-transparent pointer-events-none" />
-                          <div className="absolute top-2 right-4 flex items-center gap-1">
-                             <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                             <span className="text-[8px] font-bold text-red-500 uppercase tracking-widest">Replay Source: Grid_Memory_Alpha</span>
+                        {/* HIGH PRIORITY RESTART BUTTON */}
+                        <motion.button 
+                          initial={{ scale: 0.9, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={resetGame}
+                          className="w-full bg-blue-600 hover:bg-blue-500 text-white py-8 rounded-[2rem] font-black uppercase tracking-[0.3em] text-2xl shadow-[0_15px_40px_rgba(37,99,235,0.4)] transition-all flex flex-col items-center justify-center gap-1 group relative overflow-hidden ring-4 ring-blue-400/20 my-2"
+                        >
+                          <motion.div 
+                            className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 -skew-x-12 translate-x-[-200%]"
+                            animate={{ translateX: ['100%', '-200%'] }}
+                            transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                          />
+                          <div className="flex items-center gap-4 relative z-10">
+                            <RotateCcw className="w-8 h-8 group-hover:rotate-[360deg] transition-all duration-1000" />
+                            <span>PLAY AGAIN</span>
                           </div>
-                          <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[9px] font-black text-blue-400/60 uppercase tracking-[0.4em] drop-shadow-[0_0_5px_rgba(59,130,246,0.3)]">NEURAL ECHO SYNCHRONIZED</span>
-                        </div>
+                          <span className="text-[9px] opacity-60 tracking-[0.4em] font-black relative z-10">RESTORE NEURAL CONNECTION</span>
+                        </motion.button>
                         
                         <div className="grid grid-cols-2 gap-3">
                           <motion.div 
